@@ -1,0 +1,1294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Canvas 2D version of the jellyfish simulation: 3D bell projection, verlet tentacles, additive bioluminescent rendering.">
+<meta name="theme-color" content="#000106">
+<meta property="og:title" content="Medusa — Jellyfish (Canvas 2D)">
+<meta property="og:description" content="Canvas 2D version of the jellyfish simulation: 3D bell projection, verlet tentacles, additive bioluminescent rendering.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ccircle cx=%2750%27 cy=%2742%27 r=%2732%27 fill=%27%234aa3ff%27/%3E%3C/svg%3E">
+<title>Medusa — Jellyfish Physics Simulation</title>
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000106;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+  canvas#c{display:block;position:absolute;inset:0;}
+  #ui{position:absolute;top:0;left:0;z-index:30;padding:18px 20px;
+    color:rgba(120,175,225,.42);font-size:10px;letter-spacing:.14em;text-transform:uppercase;user-select:none;}
+  #ui h1{margin:0 0 2px;font-family:Georgia,serif;font-size:20px;font-weight:400;
+    letter-spacing:.02em;text-transform:none;color:rgba(175,215,255,.72);}
+  #panel{position:absolute;bottom:0;right:0;z-index:30;margin:16px;
+    background:rgba(3,10,26,.5);backdrop-filter:blur(8px);
+    border:1px solid rgba(100,170,255,.12);border-radius:4px;
+    color:rgba(140,190,235,.65);font-size:10px;letter-spacing:.08em;width:210px;cursor:default;
+    display:flex;flex-direction:column;max-height:calc(100vh - 32px);      /* fallback */
+    max-height:calc(100dvh - 32px);     /* visible viewport on mobile */
+    transition:width .22s ease;}
+  #panelHead{display:flex;align-items:center;justify-content:space-between;
+    padding:11px 14px;cursor:pointer;user-select:none;flex:0 0 auto;
+    color:rgba(160,205,240,.8);font-size:9px;letter-spacing:.2em;text-transform:uppercase;}
+  #panelHead:hover{color:rgba(200,232,255,.95);}
+  #chev{transition:transform .22s ease;font-size:11px;line-height:1;opacity:.75;}
+  #panelBody{padding:0 15px 13px;overflow-y:auto;flex:1 1 auto;min-height:0;}
+  #panel.collapsed{width:auto;}
+  #panel.collapsed #panelBody{display:none;}
+  #panel.collapsed #chev{transform:rotate(-90deg);}
+  #panel.collapsed .lbl{margin-right:10px;}
+  @media (pointer:coarse){
+    #panelHead{padding:16px 16px;min-height:48px;}
+    #chev{font-size:15px;}
+  }
+  #panel .row{display:flex;justify-content:space-between;align-items:center;margin:7px 0;}
+  #panel label{text-transform:uppercase;}
+  #panel .val{color:rgba(190,225,255,.95);font-variant-numeric:tabular-nums;}
+  #panel input[type=range]{width:100%;height:2px;margin:4px 0 0;appearance:none;
+    background:rgba(100,170,255,.18);border-radius:2px;outline:none;cursor:pointer;}
+  #panel input[type=range]::-webkit-slider-thumb{appearance:none;width:9px;height:9px;border-radius:50%;
+    background:#7cc4ff;box-shadow:0 0 8px rgba(120,190,255,.8);cursor:pointer;}
+  #panel input[type=range]::-moz-range-thumb{width:9px;height:9px;border:none;border-radius:50%;background:#7cc4ff;cursor:pointer;}
+  #panel .grp{margin-bottom:9px;}
+  #panel .hd{color:rgba(130,180,230,.42);font-size:9px;letter-spacing:.18em;
+    border-bottom:1px solid rgba(100,170,255,.1);padding-bottom:5px;margin:2px 0 9px;}
+  #panel button{width:100%;margin-top:4px;padding:6px;background:rgba(100,170,255,.08);
+    border:1px solid rgba(100,170,255,.2);border-radius:3px;color:rgba(180,218,255,.85);
+    font-family:inherit;font-size:9px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;}
+  #panel button:hover{background:rgba(100,170,255,.16);}
+  #hud{position:absolute;bottom:16px;left:20px;z-index:30;color:rgba(120,175,225,.3);
+    font-size:10px;letter-spacing:.1em;user-select:none;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="ui">
+  <h1>Medusa</h1>
+  <div>jet propulsion &middot; verlet filaments &middot; bioluminescence</div>
+</div>
+
+<div id="panel">
+  <div id="panelHead" role="button" tabindex="0" aria-expanded="true" aria-controls="panelBody">
+    <span class="lbl">Controls</span><span id="chev">&#9662;</span>
+  </div>
+  <div id="panelBody">
+  <div class="hd" style="margin-top:0">Water</div>
+  <div class="grp"><div class="row"><label>Population</label><span class="val" id="v-pop">10</span></div>
+    <input type="range" id="s-pop" min="1" max="20" step="1" value="10"></div>
+  <div class="grp"><div class="row"><label>Current</label><span class="val" id="v-cur">0.60</span></div>
+    <input type="range" id="s-cur" min="0" max="2" step="0.05" value="0.6"></div>
+  <div class="grp"><div class="row"><label>Viscosity</label><span class="val" id="v-vis">1.00</span></div>
+    <input type="range" id="s-vis" min="0.3" max="2.5" step="0.05" value="1.0"></div>
+
+  <div class="hd">Animal</div>
+  <div class="grp"><div class="row"><label>Pulse rate</label><span class="val" id="v-rate">1.00</span></div>
+    <input type="range" id="s-rate" min="0.3" max="2.2" step="0.05" value="1.0"></div>
+  <div class="grp"><div class="row"><label>Wander</label><span class="val" id="v-wan">1.00</span></div>
+    <input type="range" id="s-wan" min="0" max="2.5" step="0.05" value="1.0"></div>
+  <div class="grp"><div class="row"><label>Pulse depth</label><span class="val" id="v-pd">1.00</span></div>
+    <input type="range" id="s-pd" min="0" max="2" step="0.05" value="1.0"></div>
+  <div class="grp"><div class="row"><label>Scatter</label><span class="val" id="v-sss">1.00</span></div>
+    <input type="range" id="s-sss" min="0" max="2" step="0.05" value="1.0"></div>
+  <div class="grp"><div class="row"><label>Tissue</label><span class="val" id="v-tis">1.00</span></div>
+    <input type="range" id="s-tis" min="0" max="2" step="0.05" value="1.0"></div>
+
+  <div class="hd">Water light</div>
+  <div class="grp"><div class="row"><label>Shafts</label><span class="val" id="v-shafts">1.00</span></div>
+    <input type="range" id="s-shafts" min="0" max="2.5" step="0.05" value="1.0"></div>
+  <div class="grp"><div class="row"><label>Caustics</label><span class="val" id="v-caus">1.00</span></div>
+    <input type="range" id="s-caus" min="0" max="2.5" step="0.05" value="1.0"></div>
+
+  <div class="hd">Camera</div>
+  <div class="grp"><div class="row"><label>Shutter</label><span class="val" id="v-shut">0.42</span></div>
+    <input type="range" id="s-shut" min="0.08" max="1" step="0.02" value="0.42"></div>
+  <div class="grp"><div class="row"><label>Aperture</label><span class="val" id="v-dof">1.00</span></div>
+    <input type="range" id="s-dof" min="0" max="2" step="0.05" value="1.0"></div>
+  <div class="grp"><div class="row"><label>Bloom</label><span class="val" id="v-glow">1.00</span></div>
+    <input type="range" id="s-glow" min="0" max="2" step="0.05" value="1.0"></div>
+  <div class="grp"><div class="row"><label>Grain</label><span class="val" id="v-grain">1.00</span></div>
+    <input type="range" id="s-grain" min="0" max="2" step="0.05" value="1.0"></div>
+  <button id="btn-reset">Reseed</button>
+  </div>
+</div>
+
+<div id="hud">drifting</div>
+
+<script>
+"use strict";
+(function(){
+
+/* ═══════════════════════════════════════════════════════════
+   CANVAS + BUFFERS
+
+   scene  — this frame's light, transparent background
+   accum  — the exposure buffer that produces motion blur
+   tmp    — staging for each depth-of-field bucket
+   ═══════════════════════════════════════════════════════════ */
+const cv  = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const DPR = Math.min(devicePixelRatio||1, 1.75);
+let W=0,H=0;
+
+const mk=()=>{const c=document.createElement('canvas');return [c,c.getContext('2d')];};
+const [scene,sctx] = mk();
+const [accum,actx] = mk();
+const [tmp,  tctx] = mk();
+const [bloomA,bA]  = mk();
+const [bloomB,bB]  = mk();
+const [grain, gctx]= mk();
+const [caust, cctx]= mk();
+const [shaft, shctx]= mk();
+const BLOOM_DIV=4, GRAIN_SIZE=256, CAUST_SIZE=256, SHAFT_DIV=4;
+
+/* Caustics: the bright web light forms when a rippled water
+   surface focuses it. Three interfering sine gratings give
+   the characteristic branching filaments; raising the result
+   to a high power thins them into sharp lines rather than
+   soft blobs. Integer frequencies keep the tile seamless. */
+function buildCaustics(){
+  caust.width=caust.height=CAUST_SIZE;
+  const img=cctx.createImageData(CAUST_SIZE,CAUST_SIZE), d=img.data;
+  const T=Math.PI*2;
+  for(let y=0;y<CAUST_SIZE;y++){
+    for(let x=0;x<CAUST_SIZE;x++){
+      const u=x/CAUST_SIZE*T, v=y/CAUST_SIZE*T;
+      let s=Math.sin(u*2+Math.sin(v*3)*0.85)
+           +Math.sin(v*2+Math.sin(u*3)*0.85)
+           +Math.sin((u+v)*2+Math.sin(u-v)*0.6);
+      s=Math.abs(s)/3;
+      const n=Math.pow(1-Math.min(1,s),3.4);
+      const i=(y*CAUST_SIZE+x)*4;
+      d[i]=195; d[i+1]=228; d[i+2]=255; d[i+3]=(n*255)|0;
+    }
+  }
+  cctx.putImageData(img,0,0);
+}
+buildCaustics();
+
+/* Tissue: mesogloea is not optically clean. It carries fine
+   mottling and granularity, and a perfectly smooth gradient
+   is one of the last things that reads as rendered rather
+   than photographed. Low-frequency mottle from integer sine
+   harmonics (so the tile wraps) plus fine speckle on top. */
+const [tissue,tsctx]=mk();
+const TISSUE_SIZE=192;
+function buildTissue(){
+  tissue.width=tissue.height=TISSUE_SIZE;
+  const img=tsctx.createImageData(TISSUE_SIZE,TISSUE_SIZE), d=img.data;
+  const T=Math.PI*2;
+  for(let y=0;y<TISSUE_SIZE;y++){
+    for(let x=0;x<TISSUE_SIZE;x++){
+      const u=x/TISSUE_SIZE*T, v=y/TISSUE_SIZE*T;
+      let m=Math.sin(u*3+1.1)*Math.sin(v*2+0.4)
+           +Math.sin(u*5-0.7)*Math.sin(v*4+2.1)*0.55
+           +Math.sin(u*8+2.3)*Math.sin(v*7-1.2)*0.28;
+      m=m/1.83*0.5+0.5;                       // 0..1 mottle
+      const speck=Math.random()*0.34;         // granularity
+      const n=Math.max(0,Math.min(1,m*0.72+speck*0.55-0.20));
+      const i=(y*TISSUE_SIZE+x)*4;
+      d[i]=185; d[i+1]=220; d[i+2]=255; d[i+3]=(n*90)|0;
+    }
+  }
+  tsctx.putImageData(img,0,0);
+}
+buildTissue();
+
+function buildGrain(){
+  grain.width=grain.height=GRAIN_SIZE;
+  const img=gctx.createImageData(GRAIN_SIZE,GRAIN_SIZE), d=img.data;
+  for(let i=0;i<d.length;i+=4){
+    const n=((Math.random()+Math.random()+Math.random())/3-0.5)*255;
+    d[i]=128+n*0.7; d[i+1]=128+n*0.85; d[i+2]=128+n; d[i+3]=255;
+  }
+  gctx.putImageData(img,0,0);
+}
+buildGrain();
+
+function resize(){
+  W=innerWidth; H=innerHeight;
+  for(const [c,g] of [[cv,ctx],[scene,sctx],[accum,actx],[tmp,tctx]]){
+    c.width=W*DPR; c.height=H*DPR;
+    g.setTransform(DPR,0,0,DPR,0,0);
+  }
+  cv.style.width=W+'px'; cv.style.height=H+'px';
+  bloomA.width=bloomB.width=Math.max(1,(W/BLOOM_DIV)|0);
+  bloomA.height=bloomB.height=Math.max(1,(H/BLOOM_DIV)|0);
+  shaft.width=Math.max(1,(W/SHAFT_DIV)|0);
+  shaft.height=Math.max(1,(H/SHAFT_DIV)|0);
+  actx.setTransform(1,0,0,1,0,0);
+  actx.clearRect(0,0,accum.width,accum.height);
+  actx.setTransform(DPR,0,0,DPR,0,0);
+}
+addEventListener('resize',resize); resize();
+
+/* ═══════════════════════════════════════════════════════════
+   PARAMETERS
+   ═══════════════════════════════════════════════════════════ */
+const P={ population:10, current:0.6, viscosity:1.0, pulseRate:1.0,
+          wander:1.0, scatter:1.0, pulseDepth:1.0, tissue:1.0, shafts:1.0, caustics:1.0,
+          shutter:0.42, dof:1.0, bloom:1.0, grain:1.0 };
+const rand=(a,b)=>a+Math.random()*(b-a);
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const TAU=Math.PI*2;
+
+/* ═══════════════════════════════════════════════════════════
+   CAMERA
+   A real perspective divide. Distance now changes apparent
+   size, brightness and focus — so an animal swimming toward
+   the lens grows and sharpens instead of merely sliding.
+   ═══════════════════════════════════════════════════════════ */
+const CAM={ F:760, near:240, far:1700, focus:330 };
+const kOf =z=>CAM.F/(CAM.F+z);
+const blurOf=z=>clamp((z-CAM.focus)/230,0,6.5)*P.dof;
+const hazeOf=z=>Math.exp(-(z-CAM.near)/1500);
+
+/* ═══════════════════════════════════════════════════════════
+   LIGHT
+   One key source shared by every animal. This is what turns
+   a collection of self-illuminated sprites into a scene:
+   they all agree on where the light is, so they all shade
+   the same way and read as occupying one space.
+   Vector points in the direction the light TRAVELS —
+   down-right and slightly toward the lens, so most animals
+   are three-quarter backlit and their gel glows.
+   ═══════════════════════════════════════════════════════════ */
+const LIGHT={x:0.42,y:0.82,z:-0.39};
+(function(){const m=Math.hypot(LIGHT.x,LIGHT.y,LIGHT.z);
+  LIGHT.x/=m; LIGHT.y/=m; LIGHT.z/=m;})();
+// screen-space direction of the light, for shading gradients
+const LDIR={x:LIGHT.x,y:LIGHT.y};
+(function(){const m=Math.hypot(LDIR.x,LDIR.y)||1; LDIR.x/=m; LDIR.y/=m;})();
+
+/* ═══════════════════════════════════════════════════════════
+   FLUID FIELD (sampled in screen space)
+   ═══════════════════════════════════════════════════════════ */
+const Fluid={
+  t:0,
+  velocityAt(x,y,out){
+    const s=0.0016, t=this.t;
+    let vx=(Math.sin(y*s*1.0+t*0.22)*14 + Math.sin(y*s*2.3-t*0.15)*6 + Math.cos(x*s*0.7+t*0.11)*4)*P.current;
+    let vy=(Math.cos(x*s*1.1-t*0.19)*9  + Math.cos(x*s*2.7+t*0.13)*4 - 2)*P.current;
+    const sp=Math.hypot(vx,vy), MAX=520;
+    if(sp>MAX){ const k=MAX/sp; vx*=k; vy*=k; }
+    out.x=isFinite(vx)?vx:0; out.y=isFinite(vy)?vy:0;
+    return out;
+  }
+};
+const _v={x:0,y:0};
+const _sp={r:0,y:0,c:0,h:0,w:0};
+
+/* ═══════════════════════════════════════════════════════════
+   VERLET FILAMENT
+   ═══════════════════════════════════════════════════════════ */
+class Filament{
+  constructor(n,seg,o){
+    this.n=n; this.baseSeg=seg; this.seg=seg;
+    this.px=new Float32Array(n); this.py=new Float32Array(n);
+    this.ox=new Float32Array(n); this.oy=new Float32Array(n);
+    this.width=o.width; this.drag=o.drag; this.stiff=o.stiff;
+    /* Real tentacles are not evenly jointed. Per-segment rest
+       length and per-segment stiffness give each one a
+       distinct kink and hang instead of a uniform arc. */
+    this.jit=new Float32Array(n-1);
+    this.sjit=new Float32Array(n-1);
+    for(let i=0;i<n-1;i++){
+      this.jit[i]=0.72+Math.random()*0.62;
+      this.sjit[i]=0.72+Math.random()*0.40;
+    }
+    this.shimmer=Math.random()*Math.PI*2;   // slow bioluminescent flicker
+    this.seeded=false;
+  }
+  seed(x,y,dx,dy){
+    for(let i=0;i<this.n;i++){
+      this.px[i]=this.ox[i]=x+dx*i*this.seg;
+      this.py[i]=this.oy[i]=y+dy*i*this.seg;
+    }
+    this.seeded=true;
+  }
+  step(dt,ax,ay,hx,hy,extra,dirx,diry){
+    if(!this.seeded) this.seed(hx,hy,dirx,diry);
+    const n=this.n,px=this.px,py=this.py,ox=this.ox,oy=this.oy;
+    const damp=1-clamp(this.drag*extra*P.viscosity*dt*6,0,0.9);
+    const c=clamp(this.drag*P.viscosity*dt*3.2,0,0.6);
+    const MAXD=this.seg*1.5;
+    /* The fluid field is smooth over distances far larger than
+       a filament, so sampling it once per filament rather than
+       once per node is visually identical and removes ~90% of
+       the trigonometry — which is what pays for the much
+       higher tentacle count. */
+    Fluid.velocityAt(px[(n/2)|0],py[(n/2)|0],_v);
+    const fvx=_v.x*dt, fvy=_v.y*dt;
+    for(let i=1;i<n;i++){
+      let fx=px[i],fy=py[i];
+      if(!isFinite(fx)||!isFinite(fy)){ fx=px[i]=ox[i]=hx; fy=py[i]=oy[i]=hy; }
+      let vx=(fx-ox[i])*damp, vy=(fy-oy[i])*damp;
+      vx+=(fvx-vx)*c; vy+=(fvy-vy)*c;
+      const sp=Math.hypot(vx,vy);
+      if(sp>MAXD){ const k=MAXD/sp; vx*=k; vy*=k; }
+      ox[i]=fx; oy[i]=fy;
+      px[i]=fx+vx+ax*dt*dt; py[i]=fy+vy+ay*dt*dt;
+    }
+    ox[0]=px[0]; oy[0]=py[0]; px[0]=hx; py[0]=hy;
+    for(let k=0;k<3;k++){
+      for(let i=0;i<n-1;i++){
+        const dx=px[i+1]-px[i], dy=py[i+1]-py[i];
+        const d=Math.hypot(dx,dy)||1e-6;
+        const rest=this.seg*this.jit[i];
+        const diff=(d-rest)/d*this.stiff*this.sjit[i];
+        const mx=dx*diff, my=dy*diff;
+        if(i===0){ px[1]-=mx; py[1]-=my; }
+        else { px[i]+=mx*0.5; py[i]+=my*0.5; px[i+1]-=mx*0.5; py[i+1]-=my*0.5; }
+      }
+    }
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PALETTE
+   ═══════════════════════════════════════════════════════════ */
+const PALETTE=[
+  {r: 72,g:158,b:255},{r: 96,g:180,b:255},{r: 56,g:132,b:250},
+  {r:118,g:196,b:255},{r: 64,g:148,b:252},
+];
+const RIM={r:200,g:232,b:255};
+/* Number of scalloped lappets around the bell margin. MUST be
+   an integer: at 5.5 the pattern did not close on itself and
+   left a 2.0-amplitude notch at the seam. */
+const LAPPETS=8;
+
+/* Cross-section of a glowing filament, as three additive
+   passes: wide+dim halo, shoulder, narrow+bright core. */
+const TENT_PASSES=[{w:3.4,a:0.085},{w:1.6,a:0.150},{w:0.65,a:0.300}];
+const TENT_GAIN=[0.55,1.0,1.75];   // three brightness classes
+/* Same idea for the bell margin: a fading band, not an outline. */
+const RIM_PASSES=[{w:4.2,a:0.22},{w:2.0,a:0.42},{w:0.8,a:1.0}];
+
+/* ═══════════════════════════════════════════════════════════
+   JELLYFISH
+
+   Orientation is a genuine 3D swim axis (yaw + pitch). The
+   viewing tilt of the bell is DERIVED from pitch rather than
+   animated on its own clock — so the perspective you see is
+   always the perspective implied by where the animal is
+   going. That is what stops it reading as a spinning disc.
+   ═══════════════════════════════════════════════════════════ */
+class Jellyfish{
+  constructor(){
+    this.col=PALETTE[(Math.random()*PALETTE.length)|0];
+    this.base=rand(0.75,1.5);            // world size
+    this.z=rand(CAM.near,CAM.far);
+    const k=kOf(this.z);
+    this.wx=(rand(0,W)-W/2)/k;
+    this.wy=(rand(0,H)-H/2)/k;
+    this.vx=0; this.vy=0; this.vz=0;
+
+    /* 3D heading */
+    this.yaw=rand(0,TAU);                 // rotation in the image plane
+    this.pitch=rand(-0.75,0.75);            // toward (+) or away (−) from lens
+    this.yawTarget=this.yaw;
+    this.pitchTarget=this.pitch;
+    this.yawVel=0; this.pitchVel=0;
+    this.wanderPhase=rand(0,100);
+    this.wanderRate=rand(0.03,0.085);
+
+    /* slow roll about the animal's own axis — real, and it
+       keeps the tentacle set from looking pinned in place */
+    this.spin=rand(0,TAU);
+    this.spinRate=rand(-0.055,0.055);
+
+    this.phase=Math.random();
+    /* Larger bells beat slower — the same scaling real medusae
+       show. Period is a MEAN, not a fixed value: it is
+       resampled every cycle so no two animals stay in step
+       and none of them behaves like a metronome. */
+    this.periodMean=rand(3.2,5.4)*Math.pow(this.base,0.45);
+    this.period=this.newPeriod();
+    this.c=0; this.cPrev=0; this.cVel=0;
+
+    this.RING=16;
+    this.ringR=new Float32Array(this.RING);
+    this.ringV=new Float32Array(this.RING);
+    this.ruffle=rand(0,TAU);
+
+    /* ── shape identity ──────────────────────────────────
+       Every bell used to be the SAME analytic curve with the
+       same eight even lappets. That regularity was the main
+       thing reading as artificial: real animals share a body
+       plan but no two share an outline. Each jellyfish now
+       gets its own profile exponent, its own lappet count and
+       phase, and a few low harmonics perturbing the margin,
+       so no silhouette is perfectly circular or repeatable.
+       All harmonics use integer wavenumbers so the margin
+       still closes on itself exactly. */
+    this.profExp=rand(0.64,0.95);
+    this.profBulge=rand(-0.10,0.13);
+    this.lapK=7+((Math.random()*5)|0);
+    this.lapA=rand(0.050,0.115);
+    this.lapA2=rand(0.010,0.030);
+    this.lapPh=rand(0,TAU);
+    this.mH=[];
+    for(const k of [2,3,5]) this.mH.push({k,a:rand(0.010,0.042),p:rand(0,TAU)});
+    this.gonadPh=rand(0,TAU);
+    this.gonadR=[rand(.75,1.3),rand(.75,1.3),rand(.75,1.3),rand(.75,1.3)];
+
+    /* Far more tentacles, far finer. In the reference the
+       tentacles overlap into a translucent curtain where you
+       cannot pick out individuals; at 30 you could count
+       them, which read as drawn. */
+    const tn=58+((Math.random()*30)|0);
+    this.tentacles=[];
+    this.tentClass=[[],[],[]];
+    const clumps=3+((Math.random()*4)|0);
+    for(let i=0;i<tn;i++){
+      const b=(i/tn)*TAU;
+      const r=Math.random();
+      const cls = r<0.10 ? 2 : (r<0.42 ? 1 : 0);
+      const t={
+        theta:b+Math.sin(b*clumps+this.ruffle)*0.13+rand(-0.06,0.06), z:0, cls,
+        f:new Filament(cls===2?14:11,(cls===2?9.5:7.4)*rand(0.65,1.45),
+          {width:(cls===2?rand(0.55,0.85):rand(0.26,0.52)),
+           drag:rand(0.7,1.0), stiff:0.86})
+      };
+      this.tentacles.push(t);
+      this.tentClass[cls].push(t);
+    }
+    this.arms=[];
+    for(let i=0;i<4;i++){
+      this.arms.push({theta:i/4*TAU+0.4, z:0,
+        f:new Filament(10,7.0,{width:rand(1.8,3.0), drag:0.55, stiff:0.9})});
+    }
+    this.recomputeScreen();
+  }
+
+  recomputeScreen(){
+    this.k=kOf(this.z);
+    this.s=this.base*this.k*1.55;         // apparent scale
+    this.x=W/2+this.wx*this.k;
+    this.y=H/2+this.wy*this.k;
+    this.bw=52*this.s; this.bh=64*this.s;
+    /* Tilt is the pitch of the swim axis. Swimming toward the
+       lens shows the underside; away shows the top of the bell. */
+    /* Beyond ~0.8 rad the margin ellipse projects above the
+       apex and the outline self-intersects, so the rendered
+       tilt is clamped inside the geometrically valid range. */
+    this.tilt=clamp(this.pitch,-0.78,0.78);
+  }
+
+  /* 3D swim axis in camera space */
+  axis3(){
+    const cp=Math.cos(this.pitch), sp=Math.sin(this.pitch);
+    return { x:Math.sin(this.yaw)*cp, y:-Math.cos(this.yaw)*cp, z:sp };
+  }
+
+  /* Inter-pulse interval is irregular. Roughly one cycle in
+     seven the animal coasts, riding the momentum of the last
+     jet before beating again — that pause is a large part of
+     why real jellyfish do not look mechanical. */
+  newPeriod(){
+    const jitter=0.82+Math.random()*0.40;
+    const coast=Math.random()<0.20 ? 1.6+Math.random()*0.9 : 1;
+    return this.periodMean*jitter*coast;
+  }
+
+  /* Contraction sampled at an arbitrary phase offset.
+     This is the PROPULSIVE curve — fast systole, slow
+     diastole. It is deliberately sharp, because the thrust
+     is proportional to how abruptly water leaves the bell.
+     It drives the physics only. */
+  contractionAt(lag){
+    let p=this.phase-lag;
+    while(p<0) p+=1;
+    while(p>=1) p-=1;
+    const C=0.24;
+    if(p<C){ const f=p/C; return f*f*(3-2*f); }
+    const f=(p-C)/(1-C);
+    return clamp(Math.pow(1-f,2.4),0,1);
+  }
+
+  /* What the bell VISIBLY does. Driving the silhouette
+     straight off the propulsive curve gave a hard, snappy
+     squeeze on a ~1.5s cycle — which read as a beating
+     heart rather than a swimming animal. A real bell flexes
+     smoothly and only slightly; almost all the drama of the
+     stroke is in the water, not in the outline. So the
+     visible deformation is a gentle sinusoid, phase-aligned
+     to systole but with no discontinuity in its rate. */
+  breathAt(lag){
+    let p=this.phase-lag+0.26;
+    while(p<0) p+=1;
+    while(p>=1) p-=1;
+    return 0.5-0.5*Math.cos(p*TAU);
+  }
+
+  /* ── bell geometry ──────────────────────────────────────
+     Everything below takes a BODY-frame azimuth. project()
+     is the only place that adds spin. Mixing the two frames
+     was making the soft-body deformation stay pinned to the
+     screen while the animal rotated underneath it, which is
+     what made spinning bells look like they were flexing. */
+
+  /* radial modulation of the margin, 1.0 = perfect circle */
+  marginMod(bodyTheta){
+    const idx=((Math.round(bodyTheta/TAU*this.RING)%this.RING)+this.RING)%this.RING;
+    /* A jellyfish steers by contracting one side of the bell
+       harder than the other, so a turning animal is visibly
+       lopsided. Turning is a screen-space act, so this one
+       term legitimately uses the view azimuth. */
+    const turn=clamp(this.yawVel*0.55,-0.28,0.28);
+    const asym=1-turn*Math.sin(bodyTheta+this.spin);
+    let hsum=0;
+    for(let i=0;i<this.mH.length;i++){
+      const m=this.mH[i];
+      hsum+=m.a*Math.cos(bodyTheta*m.k+m.p);
+    }
+    return (1+this.breathAt(0)*P.pulseDepth*0.045
+             +this.ringR[idx]*0.012+hsum)*asym;
+  }
+
+  /* Point on the bell surface. s=0 apex, s=1 margin.
+     The margin modulation is blended in as s², so the
+     silhouette and the rim are generated by the SAME
+     expression and cannot disagree at the join. */
+  surface(s,bodyTheta,inset,out){
+    /* Amplitudes here are a fraction of what they were:
+       ~7% width and ~5% height at full depth, against 24%
+       and 20% before. A moon jelly barely changes outline. */
+    const cs=this.breathAt((1-s)*0.07)*P.pulseDepth;
+    const w=this.bw*(1-cs*0.070)*inset;
+    const h=this.bh*(1+cs*0.052)*inset;
+    const a=s*Math.PI/2;
+    const s2=s*s;
+    const mod=1+(this.marginMod(bodyTheta)-1)*s2;
+    out.r=w*Math.pow(Math.sin(a),this.profExp)
+           *(1+this.profBulge*Math.sin(a*2))*mod;
+    // scalloped lappets: two integer harmonics, per-animal
+    // count and phase, so the frill differs on every bell
+    out.y=-h*Math.cos(a)
+          +h*( this.lapA *Math.cos(bodyTheta*this.lapK  +this.lapPh)
+             + this.lapA2*Math.cos(bodyTheta*this.lapK*2-this.lapPh*1.7))*s2*s;
+    out.c=cs; out.h=h; out.w=w;
+    return out;
+  }
+
+  project(r,y,theta,out){
+    const th=theta+this.spin;
+    const sf=Math.sin(this.tilt), cf=Math.cos(this.tilt);
+    const lx=r*Math.sin(th), lz=r*Math.cos(th);
+    const ly=y*cf+lz*sf;
+    const cs=Math.cos(this.yaw), sn=Math.sin(this.yaw);
+    out.x=this.x+lx*cs-ly*sn;
+    out.y=this.y+lx*sn+ly*cs;
+    out.z=lz*Math.cos(this.tilt)-y*Math.sin(this.tilt);   // depth for sorting
+    return out;
+  }
+
+  step(dt){
+    this.recomputeScreen();
+
+    this.phase+=dt/this.period*P.pulseRate;
+    if(this.phase>=1){ this.phase-=1; this.period=this.newPeriod(); }
+
+    /* Propulsive contraction state. This drives the physics
+       only — the visible bell shape comes from breathAt().
+       Fast systole, slow passive diastole. */
+    const CONTRACT=0.24, p=this.phase;
+    this.cPrev=this.c;
+    if(p<CONTRACT){ const f=p/CONTRACT; this.c=f*f*(3-2*f); }
+    else { const f=(p-CONTRACT)/(1-CONTRACT); this.c=clamp(Math.pow(1-f,2.4),0,1); }
+    this.cVel=(this.c-this.cPrev)/Math.max(dt,1e-4);
+
+    const A=52*54*this.base*this.base;
+    let thrust=0;
+    if(this.cVel>0) thrust=this.cVel*this.cVel*A*0.052;
+    else if(p>CONTRACT&&p<CONTRACT+0.30) thrust=this.cVel*this.cVel*A*0.016;
+
+    const a3=this.axis3();
+    const mass=1.1*this.base*this.base, mEff=mass*1.6;
+    let fx=a3.x*thrust, fy=a3.y*thrust, fz=a3.z*thrust;
+
+    /* drag against relative flow (fluid is 2D, so z drags freely) */
+    Fluid.velocityAt(this.x,this.y,_v);
+    const fvx=_v.x/this.k, fvy=_v.y/this.k;      // screen flow → world flow
+    const rvx=this.vx-fvx, rvy=this.vy-fvy, rvz=this.vz;
+    const rel=Math.min(Math.hypot(rvx,rvy,rvz),1200);
+    const area=A*(1-this.c*0.30)*0.00042, Cd=1.05*P.viscosity;
+    const dragK=Math.min(Cd*area*rel/mEff, 0.9/dt);
+    fx-=dragK*rvx*mEff; fy-=dragK*rvy*mEff; fz-=dragK*rvz*mEff;
+    fy-=2.0*mass;
+
+    this.vx+=fx/mEff*dt; this.vy+=fy/mEff*dt; this.vz+=fz/mEff*dt;
+    const kk=1-clamp(0.55*P.viscosity*dt,0,0.5);
+    this.vx*=kk; this.vy*=kk; this.vz*=kk;
+    this.wx+=this.vx*dt; this.wy+=this.vy*dt; this.z+=this.vz*dt;
+
+    /* ── heading: slow and unhurried ─────────────────────
+       Nothing startles these animals, so course changes come
+       only from a gentle wander. Pitch is steered away from
+       the near/far planes so they arc back into the volume
+       instead of piling up against it. */
+    this.wanderPhase+=dt*this.wanderRate;
+    this.yawTarget+=Math.sin(this.wanderPhase*1.7+this.ruffle)*dt*0.40*P.wander;
+    this.pitchTarget=Math.sin(this.wanderPhase*0.9+this.ruffle*1.7)*0.85*P.wander;
+    if(this.z<CAM.near+140) this.pitchTarget=-Math.abs(this.pitchTarget)-0.25;
+    if(this.z>CAM.far -240) this.pitchTarget= Math.abs(this.pitchTarget)+0.25;
+
+    let dy=this.yawTarget-this.yaw;
+    while(dy> Math.PI) dy-=TAU;
+    while(dy<-Math.PI) dy+=TAU;
+    this.yawVel+=dy*1.1*dt*0.5;
+    this.yawVel*=1-clamp(2.2*dt,0,0.9);
+    this.yaw+=this.yawVel*dt;
+
+    const dp=clamp(this.pitchTarget,-0.80,0.80)-this.pitch;
+    this.pitchVel+=dp*1.3*dt*0.5;
+    this.pitchVel*=1-clamp(2.4*dt,0,0.9);
+    this.pitch=clamp(this.pitch+this.pitchVel*dt,-0.80,0.80);
+
+    this.spin+=this.spinRate*dt;
+
+    for(let i=0;i<this.RING;i++){
+      const drive=-this.cVel*1.9*P.pulseDepth+Math.sin(Fluid.t*1.7+i*0.9+this.ruffle)*0.35;
+      const acc=(drive-this.ringR[i])*46-this.ringV[i]*7.2;
+      this.ringV[i]+=acc*dt;
+      this.ringR[i]=clamp(this.ringR[i]+this.ringV[i]*dt,-8,8);
+    }
+
+    this.recomputeScreen();
+
+    /* filaments live in screen space; their rest length
+       tracks apparent scale so perspective is consistent */
+    const pt={x:0,y:0,z:0};
+    const ex=1;
+    const sx=-a3.x, sy=-a3.y;
+    const n=Math.hypot(sx,sy)||1;
+    for(const t of this.tentacles){
+      t.f.seg=t.f.baseSeg*this.s;
+      t.f.wpx=t.f.width*this.s;
+      this.surface(1,t.theta,1,_sp);
+      this.project(_sp.r,_sp.y,t.theta,pt);
+      t.z=pt.z;
+      t.f.step(dt,-a3.x*24,-a3.y*24+30,pt.x,pt.y,ex,sx/n,sy/n);
+    }
+    for(const a of this.arms){
+      a.f.seg=a.f.baseSeg*this.s;
+      a.f.wpx=a.f.width*this.s;
+      this.surface(1,a.theta,1,_sp);
+      this.project(_sp.r*0.30,_sp.y+this.bh*0.05,a.theta,pt);
+      a.z=pt.z;
+      a.f.step(dt,-a3.x*24,-a3.y*24+42,pt.x,pt.y,ex*0.8,sx/n,sy/n);
+    }
+
+    /* wrap in screen space, preserving depth */
+    const pad=this.bh*10+80;
+    let warped=false;
+    if(this.x<-pad){ this.wx=( W+pad*0.6-W/2)/this.k; warped=true; }
+    else if(this.x>W+pad){ this.wx=(-pad*0.6-W/2)/this.k; warped=true; }
+    if(this.y<-pad){ this.wy=( H+pad*0.6-H/2)/this.k; warped=true; }
+    else if(this.y>H+pad){ this.wy=(-pad*0.6-H/2)/this.k; warped=true; }
+    this.z=clamp(this.z,CAM.near,CAM.far);
+    if(warped){ this.recomputeScreen(); this.reseedFilaments(); }
+
+    this.sanitize();
+  }
+
+  reseedFilaments(){
+    for(const t of this.tentacles) t.f.seeded=false;
+    for(const a of this.arms) a.f.seeded=false;
+  }
+
+  sanitize(){
+    if(isFinite(this.wx)&&isFinite(this.wy)&&isFinite(this.z)&&
+       isFinite(this.vx)&&isFinite(this.vy)&&isFinite(this.vz)&&
+       isFinite(this.yaw)&&isFinite(this.pitch)&&isFinite(this.c)){
+      const sp=Math.hypot(this.vx,this.vy,this.vz);
+      if(sp>1400){ const k=1400/sp; this.vx*=k; this.vy*=k; this.vz*=k; }
+      return;
+    }
+    this.vx=this.vy=this.vz=0; this.yawVel=this.pitchVel=0;
+    this.c=this.cPrev=this.cVel=0;
+    this.yaw=isFinite(this.yaw)?this.yaw:0;
+    this.pitch=0; this.yawTarget=this.yaw; this.pitchTarget=0;
+    this.z=isFinite(this.z)?clamp(this.z,CAM.near,CAM.far):CAM.focus;
+    if(!isFinite(this.wx)) this.wx=0;
+    if(!isFinite(this.wy)) this.wy=0;
+    this.ringR.fill(0); this.ringV.fill(0);
+    this.recomputeScreen(); this.reseedFilaments();
+  }
+
+  /* ── rendering ───────────────────────────────────────── */
+  /* Tentacles are drawn as LIGHT, not as lines.
+     A canvas stroke has a flat cross-section; a real glowing
+     filament seen through water has a bright core with soft
+     shoulders. Three additive passes — a wide dim halo, a
+     shoulder, and a narrow bright core — approximate that
+     Gaussian profile. The whole set is batched into one path
+     per (class, pass, band), which is what makes ~80
+     tentacles per animal affordable at all: it costs ~36
+     stroke calls instead of ~2,400. */
+  drawTentacles(g,list,lum,R,G,B,behind){
+    if(!list.length) return;
+    const occl=behind?0.42:1;
+    const BANDS=4;
+    const shim=0.88+0.12*Math.sin(Fluid.t*0.55+this.ruffle);
+    for(let cls=0;cls<3;cls++){
+      const members=list[cls];
+      if(!members || !members.length) continue;
+      const gain=TENT_GAIN[cls];
+      for(const pass of TENT_PASSES){
+        for(let b=0;b<BANDS;b++){
+          let any=false;
+          g.beginPath();
+          for(const t of members){
+            const f=t.f, n=f.n, last=n-1;
+            let i0=Math.floor(b*last/BANDS);
+            let i1=Math.ceil((b+1)*last/BANDS);
+            if(b<BANDS-1) i1=Math.min(last,i1+1);   // overlap hides band seams
+            if(i1<=i0) continue;
+            g.moveTo(f.px[i0],f.py[i0]);
+            for(let i=i0+1;i<=i1;i++){
+              const mx=(f.px[i-1]+f.px[i])/2, my=(f.py[i-1]+f.py[i])/2;
+              g.quadraticCurveTo(f.px[i-1],f.py[i-1],mx,my);
+              g.lineTo(f.px[i],f.py[i]);
+            }
+            any=true;
+          }
+          if(!any) continue;
+          const u=(b+0.5)/BANDS;
+          const a=Math.pow(1-u,1.9)*pass.a*lum*gain*occl*shim;
+          if(a<0.003) continue;
+          g.strokeStyle=`rgba(${R},${G},${B},${a.toFixed(3)})`;
+          g.lineWidth=Math.max(0.2,members[0].f.wpx*pass.w*(1-u*0.62));
+          g.stroke();
+        }
+      }
+    }
+  }
+
+  drawFilament(g,f,gain,lum,R,G,B,behind){
+    const n=f.n, occl=behind?0.42:1, wpx=f.wpx||f.width;
+    for(const pass of TENT_PASSES){
+      g.beginPath();
+      g.moveTo(f.px[0],f.py[0]);
+      for(let i=1;i<n;i++){
+        const mx=(f.px[i-1]+f.px[i])/2, my=(f.py[i-1]+f.py[i])/2;
+        g.quadraticCurveTo(f.px[i-1],f.py[i-1],mx,my);
+        g.lineTo(f.px[i],f.py[i]);
+      }
+      const a=pass.a*lum*gain*occl*0.8;
+      g.strokeStyle=`rgba(${R},${G},${B},${a.toFixed(3)})`;
+      g.lineWidth=Math.max(0.2,wpx*pass.w);
+      g.stroke();
+    }
+  }
+
+  bellPath(g,inset){
+    const p={r:0,y:0,c:0,h:0,w:0}, q={x:0,y:0,z:0}, S=15;
+    // body azimuths that land on the view silhouette
+    const thL=-Math.PI/2-this.spin, thR=Math.PI/2-this.spin;
+    g.beginPath();
+    for(let i=S;i>=0;i--){
+      this.surface(i/S,thL,inset,p);
+      this.project(p.r,p.y,thL,q);
+      i===S?g.moveTo(q.x,q.y):g.lineTo(q.x,q.y);
+    }
+    for(let i=0;i<=S;i++){
+      this.surface(i/S,thR,inset,p);
+      this.project(p.r,p.y,thR,q);
+      g.lineTo(q.x,q.y);
+    }
+    // near rim, swept across the front from +90 to -90 in view
+    const M=22;
+    for(let i=0;i<=M;i++){
+      const th=Math.PI/2-(i/M)*Math.PI-this.spin;
+      this.surface(1,th,inset,p);
+      this.project(p.r,p.y,th,q);
+      g.lineTo(q.x,q.y);
+    }
+    g.closePath();
+  }
+
+  draw(g){
+    if(!isFinite(this.x)||!isFinite(this.y)||!isFinite(this.yaw)||
+       !isFinite(this.c)||!isFinite(this.bw)||!isFinite(this.tilt)) return;
+
+    const c=this.col, R=c.r, G=c.g, B=c.b;
+    const lum=0.72*hazeOf(this.z);   // steady output; nothing flares
+    if(lum<0.02) return;
+    const q={x:0,y:0,z:0}, p={r:0,y:0,c:0};
+    g.lineCap='round'; g.lineJoin='round';
+
+    /* ── lighting terms, from the shared key source ──────────
+       a3 is the bell axis. How it sits relative to the light
+       decides whether we see the lit dome, the shadowed
+       underside, or gel with light coming straight through. */
+    const a3=this.axis3();
+    const facing = -(a3.x*LIGHT.x + a3.y*LIGHT.y + a3.z*LIGHT.z);  // +1 apex into the light
+    const key   = clamp(0.5+0.5*facing, 0, 1);
+    // forward scatter: light passing THROUGH the gel toward
+    // the lens. Peaks when the animal is between us and the
+    // source, which is when real jellies glow most.
+    const through = Math.pow(clamp(-facing,0,1), 1.6);
+    const backlit = clamp(0.25 + through*1.15, 0, 1.6);
+
+    const w=this.bw, h=this.bh;
+
+    /* far-side filaments first — the bell occludes them.
+       Backlit tentacles catch the light and flare. */
+    const fl=lum*(0.75+backlit*0.5);
+    const back=[[],[],[]], front=[[],[],[]];
+    for(const t of this.tentacles) (t.z<=0?back:front)[t.cls].push(t);
+    this.drawTentacles(g,back,fl,R,G,B,true);
+
+    /* ── refraction ──────────────────────────────────────
+       The bell is a lens of denser material. Anything seen
+       THROUGH it is optically displaced, so the far-side
+       tentacles do not line up with the parts of themselves
+       that emerge past the margin. Canvas cannot refract, but
+       redrawing the occluded set magnified slightly about the
+       bell centre and clipped to the body reproduces the
+       break at the silhouette, which is the part the eye
+       actually reads. */
+    if(back[0].length||back[1].length||back[2].length){
+      g.save();
+      this.bellPath(g,1);
+      g.clip();
+      g.translate(this.x,this.y);
+      g.scale(1.075,1.075);
+      g.translate(-this.x,-this.y);
+      this.drawTentacles(g,back,fl*0.55,R,G,B,true);
+      g.restore();
+    }
+    for(const a of this.arms) if(a.z<=0) this.drawFilament(g,a.f,0.8,fl,R,G,B,true);
+
+    /* far rim seen through the gel */
+    g.beginPath();
+    const M=24;
+    for(let i=0;i<=M;i++){
+      const th=Math.PI/2+(i/M)*Math.PI-this.spin;   // the far half
+      this.surface(1,th,1,p);
+      this.project(p.r,p.y,th,q);
+      i===0?g.moveTo(q.x,q.y):g.lineTo(q.x,q.y);
+    }
+    g.strokeStyle=`rgba(${R},${G},${B},${(0.15*lum*backlit).toFixed(3)})`;
+    g.lineWidth=Math.max(0.3,0.9*this.s); g.stroke();
+
+    /* subsurface scattering, now driven by transmission:
+       thickness accumulates through the nested shells and
+       the whole body brightens when lit from behind */
+    const sss=lum*P.scatter*(0.55+backlit*0.85);
+    for(let i=0;i<5;i++){
+      this.bellPath(g,1-i*0.155);
+      g.fillStyle=`rgba(${R},${G},${B},${((0.050+i*0.012)*sss).toFixed(3)})`;
+      g.fill();
+    }
+
+    /* key light across the bell: additive compositing cannot
+       darken, so the lit side is brightened instead of the
+       shadow side being dimmed — same terminator, one pass */
+    if(key>0.05){
+      const gx=-LDIR.x*w, gy=-LDIR.y*w;
+      const kg=g.createLinearGradient(this.x+gx,this.y+gy,this.x-gx,this.y-gy);
+      const ka=0.15*lum*key;
+      kg.addColorStop(0,   `rgba(${RIM.r},${RIM.g},${RIM.b},${ka.toFixed(3)})`);
+      kg.addColorStop(0.55,`rgba(${R},${G},${B},${(ka*0.35).toFixed(3)})`);
+      kg.addColorStop(1,   `rgba(${R},${G},${B},0)`);
+      g.save();
+      this.bellPath(g,1); g.clip();
+      g.fillStyle=kg;
+      g.fillRect(this.x-w*1.6,this.y-h*1.8,w*3.2,h*3.6);
+      g.restore();
+    }
+
+    /* tissue: fine mottling inside the gel. Body-attached,
+       so it rotates with the animal rather than sliding. */
+    if(P.tissue>0.01){
+      g.save();
+      this.bellPath(g,1); g.clip();
+      g.translate(this.x,this.y);
+      g.rotate(this.yaw+this.spin*0.5);
+      const ts=Math.max(6,this.bw*2.9);
+      g.globalAlpha=clamp(0.40*P.tissue*lum,0,1);
+      g.drawImage(tissue,-ts*0.5,-ts*0.55,ts,ts);
+      g.restore();
+    }
+
+    /* caustics: the rippling web cast by the surface above.
+       Clipped to the body and scaled by the key term, so it
+       only lands on the lit side and slides across the dome
+       as the animal moves — it reads as light falling ON
+       something, which is itself a strong solidity cue. */
+    if(P.caustics>0.01 && key>0.12){
+      const t=Fluid.t;
+      g.save();
+      this.bellPath(g,1); g.clip();
+      const sc=Math.max(4,this.bw*2.6);
+      const ax=this.x-sc*0.5+Math.sin(t*0.21+this.ruffle)*this.bw*0.30;
+      const ay=this.y-sc*0.5+Math.cos(t*0.17+this.ruffle)*this.bw*0.30-this.bh*0.30;
+      g.globalAlpha=clamp(0.26*P.caustics*lum*key,0,1);
+      g.drawImage(caust,ax,ay,sc,sc);
+      // a second, larger, slower layer so the pattern shimmers
+      // instead of sliding rigidly
+      const sc2=sc*1.7;
+      g.globalAlpha=clamp(0.15*P.caustics*lum*key,0,1);
+      g.drawImage(caust,
+        this.x-sc2*0.5+Math.cos(t*0.13+this.ruffle*1.6)*this.bw*0.42,
+        this.y-sc2*0.5+Math.sin(t*0.11+this.ruffle*1.6)*this.bw*0.42-this.bh*0.30,
+        sc2,sc2);
+      g.restore();
+    }
+
+    /* latitude rings, shaded by their facing */
+    g.lineWidth=Math.max(0.25,0.5*this.s);
+    for(let j=1;j<=5;j++){
+      g.beginPath();
+      for(let i=0;i<=28;i++){
+        const th=(i/28)*TAU-this.spin;
+        this.surface(j/5.6,th,1,p);
+        this.project(p.r,p.y,th,q);
+        i===0?g.moveTo(q.x,q.y):g.lineTo(q.x,q.y);
+      }
+      g.strokeStyle=`rgba(${R},${G},${B},${(0.045*lum*(0.5+key*0.9)).toFixed(3)})`;
+      g.stroke();
+    }
+
+    /* radial canals: brighter on the lit side of the dome */
+    g.lineWidth=Math.max(0.25,0.55*this.s);
+    for(let i=0;i<12;i++){
+      const th=(i/12)*TAU-this.spin;
+      g.beginPath();
+      let front=0.32, side=0.5;
+      for(let j=0;j<=10;j++){
+        this.surface(j/10,th,1,p);
+        this.project(p.r,p.y,th,q);
+        if(j===5){
+          front=q.z>0?1:0.32;
+          // surface normal roughly points outward from centre
+          const nx=(q.x-this.x)||0, ny=(q.y-this.y)||0;
+          const nm=Math.hypot(nx,ny)||1;
+          side=clamp(0.35-((nx/nm)*LIGHT.x+(ny/nm)*LIGHT.y)*0.8,0.15,1.3);
+        }
+        j===0?g.moveTo(q.x,q.y):g.lineTo(q.x,q.y);
+      }
+      g.strokeStyle=`rgba(${R},${G},${B},${(0.10*lum*front*side).toFixed(3)})`;
+      g.stroke();
+    }
+
+    /* gastric pouches — irregular internal organs, only
+       visible on the near face. A perfectly clean bell
+       interior is another thing real animals never have. */
+    for(let i=0;i<4;i++){
+      const th=i/4*TAU+this.gonadPh-this.spin;
+      this.surface(0.55,th,1,p);
+      this.project(p.r*0.60,p.y,th,q);
+      if(q.z<=0) continue;
+      const rr=Math.max(1,this.bw*0.19*this.gonadR[i]);
+      const gp=g.createRadialGradient(q.x,q.y,0,q.x,q.y,rr);
+      const ga=0.085*lum*(0.5+key*0.7);
+      gp.addColorStop(0,  `rgba(${R},${G},${B},${ga.toFixed(3)})`);
+      gp.addColorStop(0.6,`rgba(${R},${G},${B},${(ga*0.45).toFixed(3)})`);
+      gp.addColorStop(1,  `rgba(${R},${G},${B},0)`);
+      g.fillStyle=gp;
+      g.beginPath(); g.arc(q.x,q.y,rr,0,TAU); g.fill();
+    }
+
+    /* Luminous margin. A single hard stroke gave the bell a
+       drawn, vector outline; the real edge is a band of
+       tissue that fades. Same three-pass falloff as the
+       tentacles, so the silhouette glows instead of being
+       traced. */
+    this.bellPath(g,1);
+    const ma=0.30*lum*(0.6+backlit*0.7);
+    for(const pass of RIM_PASSES){
+      g.strokeStyle=`rgba(${RIM.r},${RIM.g},${RIM.b},${(ma*pass.a).toFixed(3)})`;
+      g.lineWidth=Math.max(0.3,this.s*pass.w);
+      g.stroke();
+    }
+
+    /* specular: a tight wet highlight on the dome, sitting
+       where the light actually strikes rather than always
+       at the apex. Only visible on the near-lit side. */
+    if(key>0.30){
+      this.surface(0.34,-this.spin,1,p);
+      const off=Math.max(1,p.r*0.85);
+      const hx=this.x-LDIR.x*off, hy=this.y-LDIR.y*off-h*0.30;
+      const rad=Math.max(1,w*0.42);
+      const hg=g.createRadialGradient(hx,hy,0,hx,hy,rad);
+      const sa=0.22*lum*Math.pow(key,2.2);
+      hg.addColorStop(0,  `rgba(${RIM.r},${RIM.g},${RIM.b},${sa.toFixed(3)})`);
+      hg.addColorStop(0.4,`rgba(${RIM.r},${RIM.g},${RIM.b},${(sa*0.25).toFixed(3)})`);
+      hg.addColorStop(1,  `rgba(${RIM.r},${RIM.g},${RIM.b},0)`);
+      g.fillStyle=hg;
+      g.beginPath(); g.arc(hx,hy,rad,0,TAU); g.fill();
+    }
+
+    /* near-side filaments over the bell */
+    for(const a of this.arms) if(a.z>0) this.drawFilament(g,a.f,0.8,fl,R,G,B,false);
+    this.drawTentacles(g,front,fl,R,G,B,false);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   MARINE SNOW — now with depth
+   ═══════════════════════════════════════════════════════════ */
+const snow=[];
+function seedSnow(){
+  snow.length=0;
+  for(let i=0;i<230;i++){
+    const z=rand(CAM.near,CAM.far);
+    snow.push({x:rand(0,W),y:rand(0,H),z,r:rand(0.35,1.5),a:rand(.05,.28),d:rand(.2,1)});
+  }
+}
+function stepSnow(dt){
+  for(const s of snow){
+    Fluid.velocityAt(s.x,s.y,_v);
+    const k=kOf(s.z);
+    s.x+=_v.x*dt*s.d*0.9*k; s.y+=_v.y*dt*s.d*0.9*k+dt*6*s.d*k;
+    if(s.y>H+4){s.y=-4;s.x=rand(0,W);} if(s.y<-8) s.y=H+4;
+    if(s.x<-8) s.x=W+4; if(s.x>W+8) s.x=-4;
+  }
+}
+function drawSnow(g,lo,hi){
+  for(const s of snow){
+    if(s.z<lo||s.z>=hi) continue;
+    const k=kOf(s.z);
+    g.fillStyle=`rgba(140,195,255,${(s.a*hazeOf(s.z)).toFixed(3)})`;
+    g.beginPath(); g.arc(s.x,s.y,Math.max(0.3,s.r*k*1.6),0,TAU); g.fill();
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   POPULATION
+   ═══════════════════════════════════════════════════════════ */
+let jellies=[];
+function seed(n){
+  jellies=[];
+  for(let i=0;i<n;i++) jellies.push(new Jellyfish());
+  seedSnow();
+  actx.save(); actx.setTransform(1,0,0,1,0,0);
+  actx.clearRect(0,0,accum.width,accum.height); actx.restore();
+}
+seed(P.population);
+
+/* ═══════════════════════════════════════════════════════════
+   INPUT
+   ═══════════════════════════════════════════════════════════ */
+function bind(id,vid,key){
+  const s=document.getElementById(id), v=document.getElementById(vid);
+  const u=()=>{P[key]=parseFloat(s.value); v.textContent=P[key].toFixed(2);};
+  s.addEventListener('input',u); u();
+}
+bind('s-cur','v-cur','current');
+bind('s-vis','v-vis','viscosity');
+bind('s-rate','v-rate','pulseRate');
+bind('s-wan','v-wan','wander');
+bind('s-pd','v-pd','pulseDepth');
+bind('s-sss','v-sss','scatter');
+bind('s-tis','v-tis','tissue');
+bind('s-shafts','v-shafts','shafts');
+bind('s-caus','v-caus','caustics');
+bind('s-shut','v-shut','shutter');
+bind('s-dof','v-dof','dof');
+bind('s-glow','v-glow','bloom');
+bind('s-grain','v-grain','grain');
+const sp=document.getElementById('s-pop'), vp=document.getElementById('v-pop');
+sp.addEventListener('input',()=>{P.population=+sp.value; vp.textContent=P.population; seed(P.population);});
+document.getElementById('btn-reset').addEventListener('click',()=>seed(P.population));
+
+/* collapsible control panel */
+const panel=document.getElementById('panel'), head=document.getElementById('panelHead');
+function togglePanel(){
+  const open=panel.classList.toggle('collapsed')===false;
+  head.setAttribute('aria-expanded',String(open));
+}
+head.addEventListener('click',togglePanel);
+head.addEventListener('keydown',e=>{
+  if(e.key==='Enter'||e.key===' '){ e.preventDefault(); togglePanel(); }
+});
+
+/* ═══════════════════════════════════════════════════════════
+   RENDER
+   ═══════════════════════════════════════════════════════════ */
+function background(g){
+  const gr=g.createLinearGradient(0,0,0,H);
+  gr.addColorStop(0,'#010b1c'); gr.addColorStop(0.45,'#010714'); gr.addColorStop(1,'#000106');
+  g.fillStyle=gr; g.fillRect(0,0,W,H);
+  const rg=g.createRadialGradient(W*0.5,-H*0.3,10,W*0.5,-H*0.3,H*1.15);
+  rg.addColorStop(0,'rgba(10,44,105,0.30)'); rg.addColorStop(1,'rgba(0,0,0,0)');
+  g.fillStyle=rg; g.fillRect(0,0,W,H);
+}
+
+/* three depth-of-field buckets, drawn back to front and
+   blurred by how far each sits from the focal plane */
+const BUCKETS=[
+  {lo:CAM.focus+760, hi:CAM.far+1, blur:5.0},
+  {lo:CAM.focus+250, hi:CAM.focus+760, blur:2.2},
+  {lo:CAM.near-1,    hi:CAM.focus+250, blur:0.0},
+];
+
+function clearC(g,c){ g.save(); g.setTransform(1,0,0,1,0,0); g.clearRect(0,0,c.width,c.height); g.restore(); }
+
+function drawScene(){
+  clearC(sctx,scene);
+  jellies.sort((a,b)=>b.z-a.z);
+  for(const bk of BUCKETS){
+    const set=jellies.filter(j=>j.z>=bk.lo&&j.z<bk.hi);
+    // a real lens on a moving subject in dark water resolves
+    // nothing perfectly; never let anything stay vector-crisp
+    const blur=Math.max(0.75,bk.blur*P.dof);
+    if(!set.length && blur<0.05){ 
+      sctx.save(); sctx.globalCompositeOperation='lighter'; drawSnow(sctx,bk.lo,bk.hi); sctx.restore();
+      continue;
+    }
+    clearC(tctx,tmp);
+    tctx.save(); tctx.globalCompositeOperation='lighter';
+    drawSnow(tctx,bk.lo,bk.hi);
+    for(const j of set) j.draw(tctx);
+    tctx.restore();
+    sctx.save();
+    sctx.globalCompositeOperation='lighter';
+    if(blur>0.05) sctx.filter=`blur(${blur.toFixed(2)}px)`;
+    sctx.setTransform(1,0,0,1,0,0);
+    sctx.drawImage(tmp,0,0);
+    sctx.setTransform(DPR,0,0,DPR,0,0);
+    sctx.filter='none';
+    sctx.restore();
+  }
+}
+
+/* Temporal accumulation: fade what the sensor already holds,
+   then add this frame's light. A low shutter value means a
+   long exposure, so fast tentacles smear the way they do in
+   real low-light footage. */
+function accumulate(){
+  const a=clamp(P.shutter,0.08,1);
+  actx.save();
+  actx.setTransform(1,0,0,1,0,0);
+  if(a<0.999){
+    actx.globalCompositeOperation='destination-out';
+    actx.fillStyle=`rgba(0,0,0,${a})`;
+    actx.fillRect(0,0,accum.width,accum.height);
+  } else {
+    actx.clearRect(0,0,accum.width,accum.height);
+  }
+  actx.globalCompositeOperation='lighter';
+  actx.globalAlpha=a;
+  actx.drawImage(scene,0,0);
+  actx.restore();
+}
+
+/* Volumetric shafts: light scattering off suspended particles
+   along the key direction. Drawn in a rotated frame so every
+   shaft runs exactly parallel to the light vector, then
+   blurred heavily — the softness is what makes it read as
+   light in water rather than stripes on glass. */
+function drawShafts(){
+  if(P.shafts<0.01) return;
+  const sw=shaft.width, sh=shaft.height;
+  shctx.setTransform(1,0,0,1,0,0);
+  shctx.clearRect(0,0,sw,sh);
+  const ang=Math.atan2(LDIR.y,LDIR.x);
+  const L=Math.hypot(sw,sh)*1.35;
+  const t=Fluid.t;
+
+  shctx.save();
+  shctx.translate(sw*0.5,sh*0.5);
+  shctx.rotate(ang);
+  shctx.globalCompositeOperation='lighter';
+  const N=7;
+  for(let i=0;i<N;i++){
+    // slow lateral drift and breathing width, as the surface ripples
+    const spread=L*0.62;
+    const off=((i+0.5)/N-0.5)*2*spread + Math.sin(t*0.075+i*1.9)*spread*0.13;
+    const wdt=L*(0.020+0.026*(0.5+0.5*Math.sin(i*2.4+t*0.06)));
+    const amp=(0.5+0.5*Math.sin(i*1.3+t*0.09))*0.55+0.45;
+    const gr=shctx.createLinearGradient(-L*0.5,0,L*0.5,0);
+    gr.addColorStop(0,   'rgba(120,185,255,0)');
+    gr.addColorStop(0.18,`rgba(130,195,255,${(0.085*amp*P.shafts).toFixed(3)})`);
+    gr.addColorStop(0.55,`rgba(115,180,255,${(0.045*amp*P.shafts).toFixed(3)})`);
+    gr.addColorStop(1,   'rgba(100,165,255,0)');
+    shctx.fillStyle=gr;
+    shctx.fillRect(-L*0.5,off-wdt*0.5,L,wdt);
+  }
+  shctx.restore();
+
+  ctx.save();
+  ctx.globalCompositeOperation='lighter';
+  ctx.filter='blur(9px)';
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.drawImage(shaft,0,0,cv.width,cv.height);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.filter='none';
+  ctx.restore();
+}
+
+function postGrain(){
+  if(P.grain<0.01) return;
+  ctx.save();
+  ctx.globalCompositeOperation='overlay';
+  ctx.globalAlpha=0.055*P.grain;
+  const ox=-(Math.random()*GRAIN_SIZE)|0, oy=-(Math.random()*GRAIN_SIZE)|0;
+  for(let x=ox;x<W;x+=GRAIN_SIZE) for(let y=oy;y<H;y+=GRAIN_SIZE) ctx.drawImage(grain,x,y);
+  ctx.restore();
+}
+
+function vignette(){
+  const g=ctx.createRadialGradient(W*0.5,H*0.5,Math.min(W,H)*0.28,W*0.5,H*0.5,Math.max(W,H)*0.78);
+  g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,0.55)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+}
+
+function render(){
+  drawScene();
+  accumulate();
+
+  background(ctx);
+  drawShafts();
+  ctx.save();
+  ctx.globalCompositeOperation='lighter';
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.drawImage(accum,0,0);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.restore();
+
+  if(P.bloom>0.01){
+    bA.clearRect(0,0,bloomA.width,bloomA.height);
+    bA.drawImage(cv,0,0,bloomA.width,bloomA.height);
+    bB.clearRect(0,0,bloomB.width,bloomB.height);
+    bB.filter='blur(4px)'; bB.drawImage(bloomA,0,0); bB.filter='none';
+    bA.clearRect(0,0,bloomA.width,bloomA.height);
+    bA.filter='blur(10px)'; bA.drawImage(bloomB,0,0); bA.filter='none';
+    ctx.save();
+    ctx.globalCompositeOperation='lighter';
+    ctx.globalAlpha=0.50*P.bloom; ctx.drawImage(bloomB,0,0,W,H);
+    ctx.globalAlpha=0.40*P.bloom; ctx.drawImage(bloomA,-1,0,W+2,H);
+    ctx.restore();
+  }
+
+  vignette();
+  postGrain();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   FIXED-TIMESTEP LOOP — 120 Hz physics
+   ═══════════════════════════════════════════════════════════ */
+const STEP=1/120;
+let acc=0,last=performance.now();
+(function frame(now){
+  let dt=(now-last)/1000; last=now;
+  if(dt>0.25) dt=0.25;
+  acc+=dt;
+  let guard=0;
+  while(acc>=STEP && guard++<8){
+    Fluid.t+=STEP;
+    for(const j of jellies) j.step(STEP);
+    stepSnow(STEP);
+    acc-=STEP;
+  }
+  render();
+  requestAnimationFrame(frame);
+})(performance.now());
+
+})();
+</script>
+</body>
+</html>
